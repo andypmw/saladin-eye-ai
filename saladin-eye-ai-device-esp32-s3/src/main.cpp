@@ -327,8 +327,8 @@ bool capturePhotoContinuously()
   sprintf(hourFolderName, "/%02d", now.hour());
 
   // Prepare the mm-ss.jpg file name from RTC
-  char photoFilename[13];
-  sprintf(photoFilename, "/%02d-%02d.jpg", now.minute(), now.second());
+  char photoFilename[12];
+  sprintf(photoFilename, "%02d-%02d.jpg", now.minute(), now.second());
 
   // Make sure the YYYY-MM-DD folder exists in the SD card
   if (!SD_MMC.exists(folderName))
@@ -340,8 +340,27 @@ bool capturePhotoContinuously()
   if (!SD_MMC.exists(String(folderName) + String(hourFolderName)))
   {
     SD_MMC.mkdir(String(folderName) + String(hourFolderName));
+
+    // Also need to create the list-photo.txt file in the folder
+    File listPhotoFile = SD_MMC.open(String(folderName) + String(hourFolderName) + "/list-photo.txt", FILE_WRITE);
+
+    // Close the file handler
+    listPhotoFile.close();
   }
 
   // Capture the photo with full path YYYY-MM-DD/HH/mm-ss.jpg
-  return capturePhoto(String(folderName) + String(hourFolderName) + String(photoFilename));
+  bool captureResult = capturePhoto(String(folderName) + String(hourFolderName) + "/" + String(photoFilename));
+
+  if (!captureResult)
+  {
+    return false;
+  }
+
+  // Append the photo filename to the list-photo.txt file
+  File listPhotoFile = SD_MMC.open(String(folderName) + String(hourFolderName) + "/list-photo.txt", FILE_APPEND);
+  listPhotoFile.println(String(photoFilename));
+  listPhotoFile.close();
+  log_d("Photo filename appended to list-photo.txt");
+
+  return true;
 }
