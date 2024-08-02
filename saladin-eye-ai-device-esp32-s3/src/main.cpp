@@ -75,15 +75,13 @@ NTPClient timeClient(ntpUDP, ntpServer, utcOffsetInSeconds, 60000);
 // Define RTC
 RTC_DS3231 rtc;
 
-// Global variables
-int photoCaptureCount = 0;
-
 // Functions declaration
 void updateRtcFromNtp();
 String getFormattedRtcTime();
 bool initCamera();
 bool initSdCard();
 bool capturePhoto(String targetFullPath);
+bool capturePhotoContinuously();
 
 // Setup code, to run once
 void setup()
@@ -155,11 +153,12 @@ void loop()
   // Print the formatted time
   log_d("Current RTC time: %s", getFormattedRtcTime().c_str());
 
-  // Capture a photo
-  char photoFilename[21];
-  sprintf(photoFilename, "/SaladinEye-AI-%04d.jpg", photoCaptureCount);
-  capturePhoto(String(photoFilename));
-  photoCaptureCount++;
+  // Capture photo continously, and check the result value
+  bool captureResult = capturePhotoContinuously();
+  if (!captureResult)
+  {
+    log_e("Failed to capture photo");
+  }
 
   // Wait for the next update
   delay(1000);
@@ -312,4 +311,37 @@ bool capturePhoto(String targetFullPath)
   log_i("Photo captured and saved: %s", targetFullPath.c_str());
 
   return true;
+}
+
+bool capturePhotoContinuously()
+{
+  // Get current time from RTC
+  DateTime now = rtc.now();
+
+  // Prepare the YYYY-MM-DD folder name from RTC
+  char folderName[18];
+  sprintf(folderName, "/%04d-%02d-%02d", now.year(), now.month(), now.day());
+
+  // Prepare the HH foldername from RTC
+  char hourFolderName[4];
+  sprintf(hourFolderName, "/%02d", now.hour());
+
+  // Prepare the mm-ss.jpg file name from RTC
+  char photoFilename[13];
+  sprintf(photoFilename, "/%02d-%02d.jpg", now.minute(), now.second());
+
+  // Make sure the YYYY-MM-DD folder exists in the SD card
+  if (!SD_MMC.exists(folderName))
+  {
+    SD_MMC.mkdir(folderName);
+  }
+
+  // Make sure the YYYY-MM-DD/HH folder exists in the SD card
+  if (!SD_MMC.exists(String(folderName) + String(hourFolderName)))
+  {
+    SD_MMC.mkdir(String(folderName) + String(hourFolderName));
+  }
+
+  // Capture the photo with full path YYYY-MM-DD/HH/mm-ss.jpg
+  return capturePhoto(String(folderName) + String(hourFolderName) + String(photoFilename));
 }
