@@ -28,6 +28,7 @@
 #include <NTPClient.h>
 #include <Wire.h>
 #include <RTClib.h>
+#include <PubSubClient.h>
 #include "esp_log.h"
 #include "esp_camera.h"
 #include "FS.h"
@@ -63,6 +64,13 @@
 #define SD_MMC_CLK 39
 #define SD_MMC_D0 40
 
+// Device ID, generate a unique ID for each device
+const char* deviceId = "B7K9F2Q4L";
+String mqttTopicStatusString = "saladin-eye/device/" + String(deviceId) + "/status";
+const char* mqttTopicStatus = mqttTopicStatusString.c_str();
+String mqttTopicCommandString = "saladin-eye/device/" + String(deviceId) + "/command";
+const char *mqttTopicCommand = mqttTopicCommandString.c_str();
+
 // Define NTP properties
 // TODO - make the UTC offset, NTP server, and NTP port configurable via SaladinEye.AI Nest.js command center
 const long utcOffsetInSeconds = 7 * 3600;
@@ -75,6 +83,19 @@ NTPClient timeClient(ntpUDP, ntpServer, utcOffsetInSeconds, 60000);
 // Define RTC
 RTC_DS3231 rtc;
 
+// MQTT
+WiFiClient wifiClient;
+const char* mqttBrokerAddress = "__REPLACE__";
+String mqttClientIdString = "SaladinEye-ESP32S3-" + String(deviceId);
+const char* mqttClientId = mqttClientIdString.c_str();
+String mqttUsernameString = "SaladinEye-ESP32S3-" + String(deviceId);
+const char* mqttUsername = mqttUsernameString.c_str();
+const char* mqttPassword = "__REPLACE__";
+PubSubClient mqttClient(wifiClient);
+long lastMsg = 0;
+char msg[50];
+int value = 0;
+
 // Functions declaration
 void updateRtcFromNtp();
 String getFormattedRtcTime();
@@ -82,6 +103,8 @@ bool initCamera();
 bool initSdCard();
 bool capturePhoto(String targetFullPath);
 bool capturePhotoContinuously();
+void mqttCallback(char *topic, byte *message, unsigned int length);
+void mqttReconnect();
 
 // Setup code, to run once
 void setup()
@@ -96,13 +119,13 @@ void setup()
   const char *ssid = "__REPLACE__";
   const char *password = "__REPLACE__";
   WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi...");
+  log_i("Connecting to WiFi...");
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
-    Serial.print(".");
+    log_i(".");
   }
-  Serial.println(" connected.");
+  log_i(" connected.");
 
   // Initialize NTP client
   timeClient.begin();
@@ -145,11 +168,16 @@ void setup()
       delay(1000);
     }
   }
+
+  mqttClient.setServer(mqttBrokerAddress, 1883);
+  mqttClient.setCallback(mqttCallback);
 }
 
 // Loop code, to run repeatedly
 void loop()
 {
+  // TODO re-enable the photo capturing code
+  /*
   // Print the formatted time
   log_d("Current RTC time: %s", getFormattedRtcTime().c_str());
 
@@ -162,6 +190,22 @@ void loop()
 
   // Wait for the next update
   delay(1000);
+  */
+
+  // Maintain MQTT connection
+  if (!mqttClient.connected())
+  {
+    mqttReconnect();
+  }
+  mqttClient.loop();
+
+  // MQTT heartbeat: publish a message every 30 seconds to the status topic
+  static unsigned long lastMsg = 0;
+  if (millis() - lastMsg > 30000) {
+    lastMsg = millis();
+    String message = "Hello from SaladinEye ESP32-S3 device";
+    mqttClient.publish(mqttTopicStatus, message.c_str());
+  }
 }
 
 void updateRtcFromNtp()
@@ -363,4 +407,60 @@ bool capturePhotoContinuously()
   log_d("Photo filename appended to list-photo.txt");
 
   return true;
+}
+
+void mqttCallback(char *topic, byte *message, unsigned int length)
+{
+  log_i("Message arrived on topic: ");
+  log_i("%s", topic);
+  log_i(". Message: ");
+  String messageTemp;
+
+  for (int i = 0; i < length; i++)
+  {
+    messageTemp += (char)message[i];
+  }
+  log_i("%s", messageTemp.c_str());
+
+  // For demo purpose that the ESP32 receives MQTT command message correctly,
+  // turn on or off the flash LED based on the message received.
+  if (String(topic) == mqttTopicCommandString)
+  {
+    log_i("Changing output to ");
+    if (messageTemp == "on")
+    {
+      log_i("on");
+      digitalWrite(FLASH_LED_GPIO_NUM, HIGH);
+    }
+    else if (messageTemp == "off")
+    {
+      log_i("off");
+      digitalWrite(FLASH_LED_GPIO_NUM, LOW);
+    }
+  }
+}
+
+void mqttReconnect()
+{
+  // Loop until we're reconnected
+  while (!mqttClient.connected())
+  {
+    log_i("Attempting MQTT connection...");
+
+    // Attempt to connect
+    if (mqttClient.connect(mqttClientId, mqttUsername, mqttPassword))
+    {
+      log_i("MQTT connected");
+      // Subscribe to the command topic
+      mqttClient.subscribe(mqttTopicCommand);
+    }
+    else
+    {
+      log_i("failed, rc=");
+      log_i("%d", mqttClient.state());
+      log_i(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
 }
