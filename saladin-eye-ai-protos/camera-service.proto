@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+service CameraService {
+  rpc GetCameraStatus(GetCameraStatusRequest) returns (GetCameraStatusResponse) {}
+}
+
+message GetCameraStatusRequest {
+  string device_id = 1;
+}
+
+message GetCameraStatusResponse {
+  string device_id = 1;
+  bool is_online = 2;
+}
