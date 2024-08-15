@@ -103,6 +103,65 @@ func (MediaService) GetPhotoUploadUrl(_ context.Context, req *genproto.GetPhotoU
 	}, nil
 }
 
+func (MediaService) ListFilesByDateHour(ctx context.Context, req *genproto.ListFilesByDateHourRequest) (*genproto.ListFilesByDateHourResponse, error) {
+	deviceId := strings.TrimSpace(req.DeviceId)
+	date := strings.TrimSpace(req.Date)
+	hour := req.Hour
+
+	if len(deviceId) != 9 {
+		log.Error().Msgf("invalid device_id %s length %d", deviceId, len(deviceId))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid device_id length: %d", len(deviceId))
+	}
+
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		log.Error().Msgf("invalid date format %s", date)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid date format: %s", date)
+	}
+
+	if hour < 0 || hour > 23 {
+		log.Error().Msgf("invalid hour %d", hour)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid hour: %d", hour)
+	}
+
+	log.Debug().Msgf("ListFilesByDateHour for device_id %s, date %s, hour %d", deviceId, date, hour)
+
+	// List objects in the S3 bucket
+	prefix := fmt.Sprintf("%s/%s/%02d", deviceId, date, hour)
+	resp, err := s3Client.ListObjectsV2(&s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		log.Error().Msgf("failed to list objects: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to list objects: %v", err)
+	}
+
+	var files []*genproto.FileInfo
+	for _, item := range resp.Contents {
+		fileName := strings.TrimPrefix(*item.Key, prefix+"/")
+		if strings.HasSuffix(fileName, ".jpg") || strings.HasSuffix(fileName, ".JPG") {
+			req, _ := s3Client.GetObjectRequest(&s3.GetObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(*item.Key),
+			})
+			downloadURL, err := req.Presign(15 * time.Minute)
+			if err != nil {
+				log.Error().Msgf("failed to generate presigned URL: %v", err)
+				return nil, status.Errorf(codes.Internal, "failed to generate presigned URL: %v", err)
+			}
+			files = append(files, &genproto.FileInfo{
+				FileName:    fileName,
+				DownloadUrl: downloadURL,
+			})
+		}
+	}
+
+	return &genproto.ListFilesByDateHourResponse{
+		TotalFiles: int32(len(files)),
+		Files:      files,
+	}, nil
+}
+
 func main() {
 	// Log setup
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
