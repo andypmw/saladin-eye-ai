@@ -2,3 +2,4 @@ go 1.22
 
 use ./saladin-eye-ai-microservices/camera-mqtt-listener
 use ./saladin-eye-ai-microservices/camera-service
+use ./saladin-eye-ai-microservices/media-service
