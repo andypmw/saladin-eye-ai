@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+service MediaService {
+  rpc GetPhotoUploadUrl(GetPhotoUploadUrlRequest) returns (GetPhotoUploadUrlResponse) {}
+}
+
+message GetPhotoUploadUrlRequest {
+  string device_id = 1;
+}
+
+message GetPhotoUploadUrlResponse {
+  string device_id = 1;
+  string upload_url = 2;
+}
