@@ -1,6 +1,7 @@
 package objectstorage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -47,7 +48,7 @@ func (objs *CloudflareR2) Init() error {
 	return nil
 }
 
-func (objs *CloudflareR2) GeneratePresignedUploadUrl(path string, durationMinute int) (string, error) {
+func (objs *CloudflareR2) GeneratePresignedUploadUrl(ctx context.Context, path string, durationMinute int) (string, error) {
 	s3req, _ := objs.s3Client.PutObjectRequest(&s3.PutObjectInput{
 		Bucket: aws.String(objs.bucketName),
 		Key:    aws.String(path),
@@ -60,7 +61,7 @@ func (objs *CloudflareR2) GeneratePresignedUploadUrl(path string, durationMinute
 	return uploadUrlStr, nil
 }
 
-func (objs *CloudflareR2) GeneratePresignedDownloadUrl(path string, durationMinute int) (string, error) {
+func (objs *CloudflareR2) GeneratePresignedDownloadUrl(ctx context.Context, path string, durationMinute int) (string, error) {
 	s3req, _ := objs.s3Client.GetObjectRequest(&s3.GetObjectInput{
 		Bucket: aws.String(objs.bucketName),
 		Key:    aws.String(path),
@@ -73,7 +74,7 @@ func (objs *CloudflareR2) GeneratePresignedDownloadUrl(path string, durationMinu
 	return downloadUrlStr, nil
 }
 
-func (objs *CloudflareR2) ListObjectsByPrefix(prefix string) ([]string, error) {
+func (objs *CloudflareR2) ListObjectsByPrefix(ctx context.Context, prefix string) ([]string, error) {
 	filenames := make([]string, 0)
 
 	resp, err := objs.s3Client.ListObjectsV2(&s3.ListObjectsV2Input{

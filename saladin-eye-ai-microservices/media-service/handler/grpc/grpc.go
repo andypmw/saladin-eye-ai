@@ -27,10 +27,10 @@ func New() *MediaService {
 	}
 }
 
-func (handler MediaService) GetPhotoUploadUrl(_ context.Context, req *genproto.GetPhotoUploadUrlRequest) (*genproto.GetPhotoUploadUrlResponse, error) {
+func (handler MediaService) GetPhotoUploadUrl(ctx context.Context, req *genproto.GetPhotoUploadUrlRequest) (*genproto.GetPhotoUploadUrlResponse, error) {
 	deviceId := strings.TrimSpace(req.DeviceId)
 
-	uploadURL, err := handler.photoService.GenerateUploadPresignedUrl(deviceId)
+	uploadURL, err := handler.photoService.GenerateUploadPresignedUrl(ctx, deviceId)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate presigned photo upload URL: %v", err)
 	}
@@ -46,7 +46,7 @@ func (handler MediaService) ListFilesByDateHour(ctx context.Context, req *genpro
 	date := strings.TrimSpace(req.Date)
 	hour := req.Hour
 
-	result, err := handler.photoService.ListObjectsByDateHour(deviceId, date, hour)
+	result, err := handler.photoService.ListObjectsByDateHour(ctx, deviceId, date, hour)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list files by date hour: %v", err)
 	}
