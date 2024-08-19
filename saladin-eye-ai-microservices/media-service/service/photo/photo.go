@@ -18,8 +18,8 @@ import (
 )
 
 type PhotoServiceIface interface {
-	GenerateUploadPresignedUrl(deviceId string) (string, error)
-	ListObjectsByDateHour(deviceId string, date string, hour int32) ([]ObjectFile, error)
+	GenerateUploadPresignedUrl(ctx context.Context, deviceId string) (string, error)
+	ListObjectsByDateHour(ctx context.Context, deviceId string, date string, hour int32) ([]ObjectFile, error)
 }
 
 type PhotoServiceImpl struct {
@@ -46,7 +46,7 @@ func New() (PhotoServiceIface, error) {
  *
  * The date time will be in UTC.
  */
-func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(deviceId string) (string, error) {
+func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, deviceId string) (string, error) {
 	if len(deviceId) != 9 {
 		msg := fmt.Sprintf("invalid device_id %s length %d", deviceId, len(deviceId))
 		log.Error().Msg(msg)
@@ -59,13 +59,13 @@ func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(deviceId string) (string,
 	now := time.Now().UTC()
 	fileName := fmt.Sprintf("%s/%s/%02d/%02d-%02d.jpg", deviceId, now.Format("2006-01-02"), now.Hour(), now.Minute(), now.Second())
 
-	return ps.objStorage.GeneratePresignedUploadUrl(fileName, 15)
+	return ps.objStorage.GeneratePresignedUploadUrl(ctx, fileName, 15)
 }
 
 /**
  * The returned file names
  */
-func (ps *PhotoServiceImpl) ListObjectsByDateHour(deviceId string, date string, hour int32) ([]ObjectFile, error) {
+func (ps *PhotoServiceImpl) ListObjectsByDateHour(ctx context.Context, deviceId string, date string, hour int32) ([]ObjectFile, error) {
 	// Initialize array to store filenames from cache or object storage API
 	filenames := make([]string, 0)
 
@@ -94,7 +94,7 @@ func (ps *PhotoServiceImpl) ListObjectsByDateHour(deviceId string, date string, 
 	redisKey := fmt.Sprintf("media-service:list-files-by-date-hour:%s:%s:%d", deviceId, date, hour)
 
 	// Check cache
-	cachedFiles, err := ps.rdb.LRange(context.Background(), redisKey, 0, -1).Result()
+	cachedFiles, err := ps.rdb.LRange(ctx, redisKey, 0, -1).Result()
 	if err != nil && err != redis.Nil {
 		log.Error().Msgf("failed to get from cache: %v", err)
 		return nil, fmt.Errorf("failed to get from cache: %w", err)
@@ -115,7 +115,7 @@ func (ps *PhotoServiceImpl) ListObjectsByDateHour(deviceId string, date string, 
 		log.Debug().Msg("cache miss, call the object-storage API")
 
 		// List objects in the S3 bucket
-		resp, err := ps.objStorage.ListObjectsByPrefix(prefix)
+		resp, err := ps.objStorage.ListObjectsByPrefix(ctx, prefix)
 		if err != nil {
 			log.Error().Msgf("failed to list objects from object-storage API: %v", err)
 			return nil, fmt.Errorf("failed to list objects from object-storage API: %w", err)
@@ -130,7 +130,7 @@ func (ps *PhotoServiceImpl) ListObjectsByDateHour(deviceId string, date string, 
 
 		// Set to cache
 		if len(filenames) > 0 {
-			_, err := ps.rdb.RPush(context.Background(), redisKey, filenames).Result()
+			_, err := ps.rdb.RPush(ctx, redisKey, filenames).Result()
 			if err != nil {
 				log.Error().Msgf("failed to set cache: %v", err)
 				return nil, fmt.Errorf("failed to set cache: %w", err)
@@ -166,7 +166,7 @@ func (ps *PhotoServiceImpl) ListObjectsByDateHour(deviceId string, date string, 
 		log.Debug().Msgf("set cache TTL to %v", cacheExpireMinute)
 
 		// Set the TTL
-		_, err = ps.rdb.Expire(context.Background(), redisKey, cacheExpireMinute).Result()
+		_, err = ps.rdb.Expire(ctx, redisKey, cacheExpireMinute).Result()
 		if err != nil {
 			log.Error().Msgf("failed to set cache TTL in redis: %v", err)
 			return nil, fmt.Errorf("failed to set cache TTL in redis: %w", err)
@@ -177,7 +177,7 @@ func (ps *PhotoServiceImpl) ListObjectsByDateHour(deviceId string, date string, 
 	result := make([]ObjectFile, 0)
 	for _, filename := range filenames {
 		fullpath := fmt.Sprintf("%s/%s", prefix, filename)
-		downloadURL, err := ps.objStorage.GeneratePresignedDownloadUrl(fullpath, constants.PHOTO_SERVICE_EXPIRATION_MINUTES)
+		downloadURL, err := ps.objStorage.GeneratePresignedDownloadUrl(ctx, fullpath, constants.PHOTO_SERVICE_EXPIRATION_MINUTES)
 		if err != nil {
 			log.Error().Msgf("failed to generate presigned URL: %v", err)
 			return nil, fmt.Errorf("failed to generate presigned URL: %w", err)
