@@ -13,11 +13,13 @@ service MediaService {
 
 message GetPhotoUploadUrlRequest {
   string device_id = 1;
+  string idempotent_key = 2;
 }
 
 message GetPhotoUploadUrlResponse {
   string device_id = 1;
   string upload_url = 2;
+  string idempotent_key = 3;
 }
 
 // -------- ListFilesByDateHour --------
