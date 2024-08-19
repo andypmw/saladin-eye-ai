@@ -18,7 +18,7 @@ import (
 )
 
 type PhotoServiceIface interface {
-	GenerateUploadPresignedUrl(ctx context.Context, deviceId string) (string, error)
+	GenerateUploadPresignedUrl(ctx context.Context, deviceId, idempotentKey string) (string, error)
 	ListObjectsByDateHour(ctx context.Context, deviceId string, date string, hour int32) ([]ObjectFile, error)
 }
 
@@ -46,11 +46,30 @@ func New() (PhotoServiceIface, error) {
  *
  * The date time will be in UTC.
  */
-func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, deviceId string) (string, error) {
+func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, deviceId, idempotentKey string) (string, error) {
 	if len(deviceId) != 9 {
 		msg := fmt.Sprintf("invalid device_id %s length %d", deviceId, len(deviceId))
 		log.Error().Msg(msg)
 		return "", errors.New(msg)
+	}
+
+	// If idempotent key set, check on redis, the key format is deviceId:idempotentKey
+	// - if exists, return error
+	// - if not exists, generate a new presigned URL and store idempotent key marker in redis
+	key := fmt.Sprintf("media-service:generate-upload-presigned-url:idempotent:%s:%s", deviceId, idempotentKey)
+
+	// Check if the key exists
+	if len(idempotentKey) > 0 {
+		exists, err := ps.rdb.Exists(ctx, key).Result()
+		if err != nil {
+			log.Error().Msgf("failed to check key exists in Redis: %v", err)
+			return "", fmt.Errorf("failed to check key exists in Redis: %w", err)
+		}
+
+		if exists > 0 {
+			log.Info().Msgf("key already exists in Redis: %s", key)
+			return "", fmt.Errorf("key already exists in Redis: %s", key)
+		}
 	}
 
 	log.Debug().Msgf("GetPhotoUploadUrl for device_id %s", deviceId)
@@ -59,7 +78,22 @@ func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, devi
 	now := time.Now().UTC()
 	fileName := fmt.Sprintf("%s/%s/%02d/%02d-%02d.jpg", deviceId, now.Format("2006-01-02"), now.Hour(), now.Minute(), now.Second())
 
-	return ps.objStorage.GeneratePresignedUploadUrl(ctx, fileName, 15)
+	uploadURL, err := ps.objStorage.GeneratePresignedUploadUrl(ctx, fileName, 15)
+	if err != nil {
+		log.Error().Msgf("failed to generate presigned URL: %v", err)
+		return "", fmt.Errorf("failed to generate presigned URL: %w", err)
+	}
+
+	// Set the idempotent key marker in Redis
+	if len(idempotentKey) > 0 {
+		_, err = ps.rdb.Set(ctx, key, "1", 15*time.Minute).Result()
+		if err != nil {
+			log.Error().Msgf("failed to set idempotent key marker in Redis: %v", err)
+			return "", fmt.Errorf("failed to set idempotent key marker in Redis: %w", err)
+		}
+	}
+
+	return uploadURL, nil
 }
 
 /**
