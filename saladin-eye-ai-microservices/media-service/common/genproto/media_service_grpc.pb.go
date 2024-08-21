@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.27.3
-// source: media-service.proto
+// source: media_service.proto
 
 package genproto
 
@@ -155,5 +155,5 @@ var MediaService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "media-service.proto",
+	Metadata: "media_service.proto",
 }
