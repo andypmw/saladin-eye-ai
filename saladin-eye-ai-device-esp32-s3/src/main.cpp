@@ -22,6 +22,8 @@
 // - SDA: Serial Data Line
 // - SCL: Serial Clock Line
 
+#include <iostream>
+#include <fstream>
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -29,10 +31,15 @@
 #include <Wire.h>
 #include <RTClib.h>
 #include <PubSubClient.h>
+#include <HTTPClient.h>
+#include <pb_encode.h>
+#include <pb_decode.h>
 #include "esp_log.h"
 #include "esp_camera.h"
 #include "FS.h"
 #include "SD_MMC.h"
+#include "genproto/media_service__get_photo_upload_url_request.pb.h"
+#include "genproto/media_service__get_photo_upload_url_response.pb.h"
 
 // GPIO pins for I2C communication with DS3231 RTC module
 #define I2C_SDA 19
@@ -64,11 +71,19 @@
 #define SD_MMC_CLK 39
 #define SD_MMC_D0 40
 
+// Timer for capturing photos and publish request over MQTT
+#define MSG_INTERVAL 10000
+
 // Device ID, generate a unique ID for each device
 const char* deviceId = "B7K9F2Q4L";
-String mqttTopicStatusString = "saladin-eye/device/" + String(deviceId) + "/status";
-const char* mqttTopicStatus = mqttTopicStatusString.c_str();
-String mqttTopicCommandString = "saladin-eye/device/" + String(deviceId) + "/command";
+
+String mqttTopicMediaServiceString = "saladin-eye/server/media-service";
+const char* mqttTopicMediaService = mqttTopicMediaServiceString.c_str();
+
+String mqttTopicResponseWildcardString = "saladin-eye/device/" + String(deviceId) + "/response/#";
+const char* mqttTopicResponseWildcard = mqttTopicResponseWildcardString.c_str();
+
+String mqttTopicCommandString = "saladin-eye/device/command";
 const char *mqttTopicCommand = mqttTopicCommandString.c_str();
 
 // Define NTP properties
@@ -105,6 +120,8 @@ bool capturePhoto(String targetFullPath);
 bool capturePhotoContinuously();
 void mqttCallback(char *topic, byte *message, unsigned int length);
 void mqttReconnect();
+bool encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
+bool decode_string(pb_istream_t *stream, const pb_field_t *field, void **arg);
 
 // Setup code, to run once
 void setup()
@@ -169,6 +186,7 @@ void setup()
     }
   }
 
+  mqttClient.setBufferSize(2048);
   mqttClient.setServer(mqttBrokerAddress, 1883);
   mqttClient.setCallback(mqttCallback);
 }
@@ -176,35 +194,19 @@ void setup()
 // Loop code, to run repeatedly
 void loop()
 {
-  // TODO re-enable the photo capturing code
-  /*
-  // Print the formatted time
-  log_d("Current RTC time: %s", getFormattedRtcTime().c_str());
-
-  // Capture photo continously, and check the result value
-  bool captureResult = capturePhotoContinuously();
-  if (!captureResult)
-  {
-    log_e("Failed to capture photo");
-  }
-
-  // Wait for the next update
-  delay(1000);
-  */
-
-  // Maintain MQTT connection
-  if (!mqttClient.connected())
-  {
+  if (!mqttClient.connected()) {
     mqttReconnect();
   }
   mqttClient.loop();
 
-  // MQTT heartbeat: publish a message every 30 seconds to the status topic
-  static unsigned long lastMsg = 0;
-  if (millis() - lastMsg > 30000) {
-    lastMsg = millis();
-    String message = "Hello from SaladinEye ESP32-S3 device";
-    mqttClient.publish(mqttTopicStatus, message.c_str());
+  unsigned long now = millis();
+  if (now - lastMsg > MSG_INTERVAL) {
+    lastMsg = now;
+    bool captureResult = capturePhotoContinuously();
+    if (!captureResult)
+    {
+      log_e("Failed to capture photo and sending GetPhotoUploadUrlRequest over MQTT");
+    }
   }
 }
 
@@ -406,37 +408,110 @@ bool capturePhotoContinuously()
   listPhotoFile.close();
   log_d("Photo filename appended to list-photo.txt");
 
+  // The JPG path
+  String photoPathString = String(folderName) + String(hourFolderName) + "/" + String(photoFilename);
+  const char* photoPath = photoPathString.c_str();
+
+  // Send message to media-service over MQTT
+  saladineye_GetPhotoUploadUrlRequest request = saladineye_GetPhotoUploadUrlRequest_init_zero;
+
+  request.device_id.arg = (void*)deviceId;
+  request.device_id.funcs.encode = encode_string;
+
+  request.original_photo_path.arg = (void*)photoPath;
+  request.original_photo_path.funcs.encode = encode_string;
+
+  // Encode the message
+  uint8_t buffer[128];
+  pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+  bool status = pb_encode(&stream, saladineye_GetPhotoUploadUrlRequest_fields, &request);
+  size_t message_length = stream.bytes_written;
+
+  if (!status) {
+    Serial.println("Failed to encode protobuf message");
+    return false;
+  }
+
+  // Publish the message to MQTT
+
+  // Create random string with length 10
+  char randomString[11];
+  for (int i = 0; i < 10; i++) {
+    randomString[i] = (char)random(65, 90);
+  }
+
+  String publishTopicString = "saladin-eye/server/media-service/request/get-photo-upload-url/" + String(deviceId) + "/" + String(randomString);
+  const char* publishTopic = publishTopicString.c_str();
+
+  mqttClient.publish(publishTopic, buffer, message_length);
+  Serial.println("FromDevice message sent to media-service over MQTT!");
+  Serial.println(publishTopic);
+
   return true;
 }
 
-void mqttCallback(char *topic, byte *message, unsigned int length)
+void mqttCallback(char *topic, byte *mqttMessage, unsigned int length)
 {
-  log_i("Message arrived on topic: ");
-  log_i("%s", topic);
-  log_i(". Message: ");
-  String messageTemp;
+  // Convert topic to String for easier manipulation
+  String topicString = String(topic);
 
-  for (int i = 0; i < length; i++)
-  {
-    messageTemp += (char)message[i];
-  }
-  log_i("%s", messageTemp.c_str());
+  // Find the position of "/response/"
+  int startIndex = topicString.indexOf("/response/");
+  if (startIndex != -1) {
+      // Extract the substring after "/response/"
+      String methodName = topicString.substring(startIndex + 10); // 10 is the length of "/response/"
+      Serial.println("Extracted method name: " + methodName);
 
-  // For demo purpose that the ESP32 receives MQTT command message correctly,
-  // turn on or off the flash LED based on the message received.
-  if (String(topic) == mqttTopicCommandString)
-  {
-    log_i("Changing output to ");
-    if (messageTemp == "on")
-    {
-      log_i("on");
-      digitalWrite(FLASH_LED_GPIO_NUM, HIGH);
-    }
-    else if (messageTemp == "off")
-    {
-      log_i("off");
-      digitalWrite(FLASH_LED_GPIO_NUM, LOW);
-    }
+      if (methodName == "media-service/get-photo-upload-url") {
+        // Decode the message
+        saladineye_GetPhotoUploadUrlResponse response = saladineye_GetPhotoUploadUrlResponse_init_zero;
+        pb_istream_t istream = pb_istream_from_buffer(mqttMessage, length);
+
+        bool decode_status = pb_decode(&istream, saladineye_GetPhotoUploadUrlResponse_fields, &response);
+
+        if (decode_status) {
+          log_i("Protobuf decode success");
+        } else {
+            log_e("decoding protobuf saladineye_GetPhotoUploadUrlResponse failed");
+            return;
+        }
+
+        // Open the JPG file
+        File jpgFile = SD_MMC.open(response.original_photo_path);
+        if (!jpgFile) {
+          log_e("failed to open JPG file to be uploaded");
+          return;
+        }
+        
+        // Get the file size
+        size_t fileSize = jpgFile.size();
+        
+        // Create an HTTP client
+        HTTPClient http;
+        
+        // Begin the HTTP request
+        http.begin(response.upload_url);
+        http.addHeader("Content-Type", "image/jpeg");
+        http.addHeader("Content-Length", String(fileSize));
+        
+        // Start the PUT request
+        int httpResponseCode = http.sendRequest("PUT", &jpgFile, fileSize);
+        
+        if (httpResponseCode > 0) {
+          String response = http.getString();
+          log_i("OK HTTP Response: %s", response.c_str());
+        } else {
+          log_e("Error HTTP response code: %d", httpResponseCode);
+        }
+        
+        // Close the file and HTTP connection
+        jpgFile.close();
+        http.end();
+      } else {
+        log_e("unknown MQTT method name");
+      }
+  } else {
+      log_e("the /response/ not found in topic");
   }
 }
 
@@ -451,8 +526,13 @@ void mqttReconnect()
     if (mqttClient.connect(mqttClientId, mqttUsername, mqttPassword))
     {
       log_i("MQTT connected");
+
       // Subscribe to the command topic
-      mqttClient.subscribe(mqttTopicCommand);
+      if (mqttClient.subscribe(mqttTopicResponseWildcard, 1)) {
+        log_i("Subscribed to topic successfully");
+      } else {
+        log_e("Subscription failed");
+      }
     }
     else
     {
@@ -463,4 +543,37 @@ void mqttReconnect()
       delay(5000);
     }
   }
+}
+
+bool encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
+{
+    const char* str = (const char*)(*arg);
+
+    if (!pb_encode_tag_for_field(stream, field))
+        return false;
+
+    return pb_encode_string(stream, (uint8_t*)str, strlen(str));
+}
+
+bool decode_string(pb_istream_t *stream, const pb_field_t *field, void **arg) {
+    Serial.println("decode_string function called");
+    Serial.printf("Stream bytes left: %d\n", stream->bytes_left);
+
+    static char str_buffer[1000];  // Adjust size as needed
+    size_t length = stream->bytes_left;
+    
+    if (length >= sizeof(str_buffer)) {
+        Serial.println("Decoding failed: Buffer too small");
+        return false;
+    }
+
+    if (!pb_read(stream, (uint8_t *)str_buffer, length)) {
+        Serial.println("Decoding failed: Reading from stream failed");
+        return false;
+    }
+    
+    str_buffer[length] = '\0';  // Null-terminate the string
+    *(char**)arg = str_buffer;  // Set the pointer to our static buffer
+
+    return true;
 }
