@@ -46,7 +46,7 @@ func New() (PhotoServiceIface, error) {
  *
  * The date time will be in UTC.
  */
-func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, deviceId, idempotentKey string) (string, error) {
+func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, deviceId, idempotencyKey string) (string, error) {
 	if len(deviceId) != 9 {
 		msg := fmt.Sprintf("invalid device_id %s length %d", deviceId, len(deviceId))
 		log.Error().Msg(msg)
@@ -56,10 +56,10 @@ func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, devi
 	// If idempotent key set, check on redis, the key format is deviceId:idempotentKey
 	// - if exists, return error
 	// - if not exists, generate a new presigned URL and store idempotent key marker in redis
-	key := fmt.Sprintf("media-service:generate-upload-presigned-url:idempotent:%s:%s", deviceId, idempotentKey)
+	key := fmt.Sprintf("media-service:generate-upload-presigned-url:idempotent:%s:%s", deviceId, idempotencyKey)
 
 	// Check if the key exists
-	if len(idempotentKey) > 0 {
+	if len(idempotencyKey) > 0 {
 		exists, err := ps.rdb.Exists(ctx, key).Result()
 		if err != nil {
 			log.Error().Msgf("failed to check key exists in Redis: %v", err)
@@ -85,7 +85,7 @@ func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, devi
 	}
 
 	// Set the idempotent key marker in Redis
-	if len(idempotentKey) > 0 {
+	if len(idempotencyKey) > 0 {
 		_, err = ps.rdb.Set(ctx, key, "1", 15*time.Minute).Result()
 		if err != nil {
 			log.Error().Msgf("failed to set idempotent key marker in Redis: %v", err)

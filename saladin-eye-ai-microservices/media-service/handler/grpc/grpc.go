@@ -29,17 +29,16 @@ func New() *MediaService {
 
 func (handler MediaService) GetPhotoUploadUrl(ctx context.Context, req *genproto.GetPhotoUploadUrlRequest) (*genproto.GetPhotoUploadUrlResponse, error) {
 	deviceId := strings.TrimSpace(req.DeviceId)
-	idempotentKey := strings.TrimSpace(req.IdempotentKey)
+	idempotencyKey := ""
 
-	uploadURL, err := handler.photoService.GenerateUploadPresignedUrl(ctx, deviceId, idempotentKey)
+	uploadURL, err := handler.photoService.GenerateUploadPresignedUrl(ctx, deviceId, idempotencyKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate presigned photo upload URL: %v", err)
 	}
 
 	return &genproto.GetPhotoUploadUrlResponse{
-		DeviceId:      deviceId,
-		UploadUrl:     uploadURL,
-		IdempotentKey: idempotentKey,
+		DeviceId:  deviceId,
+		UploadUrl: uploadURL,
 	}, nil
 }
 
