@@ -1,0 +1,3 @@
+saladineye.GetPhotoUploadUrlResponse.device_id fixed_length:true max_size:20
+saladineye.GetPhotoUploadUrlResponse.upload_url fixed_length:true max_size:1000
+saladineye.GetPhotoUploadUrlResponse.original_photo_path fixed_length:true max_size:200
