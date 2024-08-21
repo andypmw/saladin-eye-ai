@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+message GetPhotoUploadUrlResponse {
+  string device_id = 1;
+  string upload_url = 2;
+  string original_photo_path = 3;
+}

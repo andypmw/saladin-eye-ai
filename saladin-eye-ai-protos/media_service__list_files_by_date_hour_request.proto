@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+message ListFilesByDateHourRequest {
+  string device_id = 1;
+  string date = 2;
+  int32 hour = 3;
+}
