@@ -4,15 +4,9 @@ package saladineye;
 
 option go_package = "./common/genproto";
 
+import "camera_service__get_camera_status_request.proto";
+import "camera_service__get_camera_status_response.proto";
+
 service CameraService {
   rpc GetCameraStatus(GetCameraStatusRequest) returns (GetCameraStatusResponse) {}
-}
-
-message GetCameraStatusRequest {
-  string device_id = 1;
-}
-
-message GetCameraStatusResponse {
-  string device_id = 1;
-  bool is_online = 2;
 }
