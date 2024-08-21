@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+import "media_service__file_info.proto";
+
+message ListFilesByDateHourResponse {
+  int32 total_files = 1;
+  repeated FileInfo files = 2;
+}

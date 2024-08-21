@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+import "media_service__get_photo_upload_url_request.proto";
+import "media_service__get_photo_upload_url_response.proto";
+import "media_service__list_files_by_date_hour_request.proto";
+import "media_service__list_files_by_date_hour_response.proto";
+
+service MediaService {
+  rpc GetPhotoUploadUrl(GetPhotoUploadUrlRequest) returns (GetPhotoUploadUrlResponse) {}
+  rpc ListFilesByDateHour(ListFilesByDateHourRequest) returns (ListFilesByDateHourResponse) {}
+}

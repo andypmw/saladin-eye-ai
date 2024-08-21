@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package saladineye;
+
+option go_package = "./common/genproto";
+
+message GetCameraStatusRequest {
+  string device_id = 1;
+}
