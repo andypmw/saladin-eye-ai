@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,4 +93,80 @@ func (objs *CloudflareR2) ListObjectsByPrefix(ctx context.Context, prefix string
 	}
 
 	return filenames, nil
+}
+
+func (objs *CloudflareR2) ListDate(ctx context.Context, deviceId string) ([]string, error) {
+	// Create input parameters
+	input := &s3.ListObjectsV2Input{
+		Bucket:    aws.String(objs.bucketName),
+		Prefix:    aws.String(deviceId + "/"),
+		Delimiter: aws.String("/"),
+	}
+
+	// Call ListObjectsV2 to get the list of objects
+	result, err := objs.s3Client.ListObjectsV2(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list objects: %v", err)
+	}
+
+	// Create a map to store unique dates
+	dates := make(map[string]bool)
+
+	// Process the CommonPrefixes to extract dates
+	for _, commonPrefix := range result.CommonPrefixes {
+		parts := strings.Split(*commonPrefix.Prefix, "/")
+		if len(parts) >= 2 {
+			date := parts[1]
+			dates[date] = true
+		}
+	}
+
+	// Build the list of dates
+	dateList := make([]string, 0)
+	for date := range dates {
+		dateList = append(dateList, date)
+	}
+
+	// Sort the list of dates
+	sort.Strings(dateList)
+
+	return dateList, nil
+}
+
+func (objs *CloudflareR2) ListHourByDate(ctx context.Context, deviceId, date string) ([]string, error) {
+	// Create input parameters
+	input := &s3.ListObjectsV2Input{
+		Bucket:    aws.String(objs.bucketName),
+		Prefix:    aws.String(deviceId + "/" + date + "/"),
+		Delimiter: aws.String("/"),
+	}
+
+	// Call ListObjectsV2 to get the list of objects
+	result, err := objs.s3Client.ListObjectsV2(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list objects: %v", err)
+	}
+
+	// Create a map to store unique hours
+	hours := make(map[string]bool)
+
+	// Process the CommonPrefixes to extract hours
+	for _, commonPrefix := range result.CommonPrefixes {
+		parts := strings.Split(*commonPrefix.Prefix, "/")
+		if len(parts) >= 3 {
+			hour := parts[2]
+			hours[hour] = true
+		}
+	}
+
+	// Build the list of hours
+	hourList := make([]string, 0)
+	for hour := range hours {
+		hourList = append(hourList, hour)
+	}
+
+	// Sort the list of hours
+	sort.Strings(hourList)
+
+	return hourList, nil
 }

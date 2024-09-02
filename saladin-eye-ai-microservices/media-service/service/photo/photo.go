@@ -17,11 +17,6 @@ import (
 	"github.com/andypmw/saladin-eye-ai/media-service/internal/objectstorage"
 )
 
-type PhotoServiceIface interface {
-	GenerateUploadPresignedUrl(ctx context.Context, deviceId, idempotentKey string) (string, error)
-	ListObjectsByDateHour(ctx context.Context, deviceId string, date string, hour int32) ([]ObjectFile, error)
-}
-
 type PhotoServiceImpl struct {
 	objStorage objectstorage.ObjectStorageIface
 	rdb        redis.Cmdable
@@ -94,6 +89,106 @@ func (ps *PhotoServiceImpl) GenerateUploadPresignedUrl(ctx context.Context, devi
 	}
 
 	return uploadURL, nil
+}
+
+func (ps *PhotoServiceImpl) ListDate(ctx context.Context, deviceId string) ([]string, error) {
+	dates := make([]string, 0)
+
+	// Validation
+	if len(deviceId) != 9 {
+		log.Error().Msgf("invalid device_id %s length %d", deviceId, len(deviceId))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid device_id length: %d", len(deviceId))
+	}
+
+	// Cache check
+	redisKey := fmt.Sprintf("media-service:list-date:%s", deviceId)
+	cachedDates, err := ps.rdb.LRange(ctx, redisKey, 0, -1).Result()
+	if err != nil && err != redis.Nil {
+		log.Error().Msgf("failed to get from cache: %v", err)
+		return nil, fmt.Errorf("failed to get from cache: %w", err)
+	}
+
+	if len(cachedDates) > 0 {
+		log.Debug().Msg("cache hit")
+		dates = cachedDates
+		return dates, nil
+	} else {
+		log.Debug().Msg("cache miss, call the object-storage API")
+	}
+
+	dates, err = ps.objStorage.ListDate(ctx, deviceId)
+	if err != nil {
+		log.Error().Msgf("failed to list dates: %v", err)
+		return nil, fmt.Errorf("failed to list dates: %w", err)
+	}
+
+	// Set to cache
+	if len(dates) > 0 {
+		_, err := ps.rdb.RPush(ctx, redisKey, dates).Result()
+		if err != nil {
+			log.Error().Msgf("failed to set cache: %v", err)
+			return nil, fmt.Errorf("failed to set cache: %w", err)
+		}
+
+		// Set TTL
+		_, err = ps.rdb.Expire(ctx, redisKey, 5*time.Minute).Result()
+		if err != nil {
+			log.Error().Msgf("failed to set cache TTL in redis: %v", err)
+			return nil, fmt.Errorf("failed to set cache TTL in redis: %w", err)
+		}
+	}
+
+	return dates, nil
+}
+
+func (ps *PhotoServiceImpl) ListHourByDate(ctx context.Context, deviceId, date string) ([]string, error) {
+	hours := make([]string, 0)
+
+	// Validations
+	if len(deviceId) != 9 || len(date) != 10 {
+		log.Error().Msgf("invalid device_id %s length %d or date %s length %d", deviceId, len(deviceId), date, len(date))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid device_id or date length")
+	}
+
+	// Cache check
+	redisKey := fmt.Sprintf("media-service:list-hour-by-date:%s:%s", deviceId, date)
+	cachedHours, err := ps.rdb.LRange(ctx, redisKey, 0, -1).Result()
+	if err != nil && err != redis.Nil {
+		log.Error().Msgf("failed to get from cache: %v", err)
+		return nil, fmt.Errorf("failed to get from cache: %w", err)
+	}
+
+	if len(cachedHours) > 0 {
+		log.Debug().Msg("cache hit")
+		hours = cachedHours
+		return hours, nil
+	} else {
+		log.Debug().Msg("cache miss, call the object-storage API")
+	}
+
+	hours, err = ps.objStorage.ListHourByDate(ctx, deviceId, date)
+	if err != nil {
+		log.Error().Msgf("failed to list hours: %v", err)
+		return nil, fmt.Errorf("failed to list hours: %w", err)
+	}
+
+	// Set to cache
+	if len(hours) > 0 {
+		_, err := ps.rdb.RPush(ctx, redisKey, hours).Result()
+		if err != nil {
+			log.Error().Msgf("failed to set cache: %v", err)
+			return nil, fmt.Errorf("failed to set cache: %w", err)
+		}
+
+		// Set TTL
+		_, err = ps.rdb.Expire(ctx, redisKey, 5*time.Minute).Result()
+		if err != nil {
+			log.Error().Msgf("failed to set cache TTL in redis: %v", err)
+			return nil, fmt.Errorf("failed to set cache TTL in redis: %w", err)
+		}
+	}
+
+	return hours, nil
 }
 
 /**
